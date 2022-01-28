@@ -39,7 +39,7 @@
 
 /* Struct VTY. */
 struct vty *vty;
-
+extern unsigned char cellIndex_g;
 
 /* Command execution over the vty interface. */
 static int vtysh_execute_func (char *line, int pager)
@@ -374,7 +374,15 @@ static char * vtysh_prompt ()
         host.name = strdup (hostname);
     }
 */
-    snprintf (buf, sizeof buf, cmd_prompt (vty->node), hostname);
+
+    if(CELL_NODE == vty->node)
+    {
+        snprintf (buf, sizeof(buf), cmd_prompt (vty->node), cellIndex_g);   
+    }
+    else
+    {
+        snprintf (buf, sizeof(buf), cmd_prompt (vty->node), hostname);
+    }
 
     return buf;
 }

@@ -65,6 +65,12 @@ struct cmd_node npt_node =
     1	
 };
 
+struct cmd_node cell_node =
+{
+    CELL_NODE,
+    "Cell_%d#",
+};
+
 
 struct cmd_node sys_view_node =
 {
@@ -1922,6 +1928,7 @@ void cmd_init (int terminal)
 
 	
 	cmd_install_node (&sys_view_node, NULL);
+	cmd_install_node (&cell_node, NULL);
 //	cmd_install_node (&lte_view_node, NULL);
 
     /* Install top nodes. */

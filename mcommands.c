@@ -11,9 +11,10 @@
 
 //#include <winsock2.h>
 //#pragma comment(lib,"ws2_32.lib")
-
+extern UInt32 main_is_running;
 extern struct vty *vty;
-
+extern SOCKET sock_g;
+extern unsigned char cellIndex_g;
 typedef struct sockaddr_in SOCKADDR_IN;
 typedef int SOCKET;
 
@@ -82,16 +83,9 @@ SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx)
 	}
 	
 	msg_hdr = (T_VTYSH_MSG_HDR *)ctx->sndBuf;	
-	msg_hdr->sessNo = htonl(ctx->connSess);
 	msg_hdr->msgID = htonl(VTYSH_INIT_REQ);
 	msg_hdr->msgLen = htonl(sizeof(T_VTYSH_INIT_REQ));
 	
-	init_req = (T_VTYSH_INIT_REQ *)msg_hdr->data;
-	init_req->sessNo = htonl(ctx->connSess);
-	init_req->srcPort = htons(ctx->selfPort);
-	init_req->dstPort = htons(ctx->dstPort);
-	memcpy(init_req->dstIp, ctx->dstIp, 20);
-	memcpy(init_req->srcIp, ctx->selfIp, 20);
 	len += sizeof(T_VTYSH_INIT_REQ);
 	ctx->sndBufLen = len + sizeof(T_VTYSH_MSG_HDR);
 	
@@ -134,13 +128,13 @@ SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 argc,
 	cmd_ele->cmd_str[cmd_len] = '\0';
 	cmd_ele->help_str = (char *)malloc(help_len+2);
 	memcpy(cmd_ele->help_str, help_str, help_len);
-	cmd_ele->cmd_str[help_len] = '\0';
+	cmd_ele->help_str[help_len] = '\0';
 
 	ce = (struct cmd_element *)&(cmd_ele->Ele);
 	ce->string = cmd_ele->cmd_str;
 	ce->doc = cmd_ele->help_str;
 	ce->func = vtysh_command_exec_func;
-	cmd_install_element(SYS_VIEW_NODE, ce);
+	cmd_install_element(CELL_NODE, ce);
 	return ret;
 }
 
@@ -196,10 +190,9 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, cha
 	}
 	
 	msg_hdr = (T_VTYSH_MSG_HDR *)ctx->sndBuf;	
-	msg_hdr->sessNo = htonl(ctx->connSess);
 	msg_hdr->msgID = htonl(VTYSH_EXEC_REQ);
 
-	exec_req = (T_VTYSH_INIT_REQ *)msg_hdr->data;
+	exec_req = (T_VTYSH_EXEC_REQ_HDR *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
 	exec_req->Idx = htonl(idx);
 	exec_req->ArgcLen = htonl(arg_len);
 	if(arg_len > 0)
@@ -214,22 +207,26 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, cha
 SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 {
 	T_VTYSH_MSG_HDR *exec_resp = NULL;
-	UInt32 sessNo = 0;
 	UInt32 msgId = 0;
 	char *data_ptr;
 
 	exec_resp = (T_VTYSH_MSG_HDR *)ctx->recBuf;
-	sessNo = ntohl(exec_resp->sessNo);
 	msgId = ntohl(exec_resp->msgID);
 	
     UInt32 data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
-	data_ptr = (char *)exec_resp->data;
+	data_ptr = (char *)exec_resp + sizeof(T_VTYSH_MSG_HDR);
 	if(data_ptr[data_len-1] != '\0')
 	{
 		data_ptr[data_len-1] = '\0';
 	}
-
-	printf("%s\n", data_ptr);
+    if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
+    {
+        return 0;
+    }
+    else
+    {
+	    printf("%s\n", data_ptr);
+	}
 	return 0;
 }
 
@@ -246,11 +243,9 @@ SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx)
 	}
 	
 	msg_hdr = (T_VTYSH_MSG_HDR *)ctx->sndBuf;	
-	msg_hdr->sessNo = htonl(ctx->connSess);
 	msg_hdr->msgID = htonl(VTYSH_DISCONN_REQ);
 
-	init_req = (T_VTYSH_INIT_REQ *)msg_hdr->data;
-	init_req->sessNo = htonl(ctx->connSess);
+	init_req = (T_VTYSH_INIT_REQ *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
 	init_req->srcPort = htons(ctx->selfPort);
 	init_req->dstPort = htonl(ctx->dstPort);
 	memcpy(init_req->dstIp, ctx->dstIp, 20);
@@ -273,22 +268,13 @@ SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx)
 {
 	UInt32 msgId;
 	UInt32 msgLen;
-	UInt32 sessNum;
 	SInt32 ret;
 	UInt8 *ptr = (UInt8 *)ctx->recBuf;	
 	T_VTYSH_MSG_HDR * msg_hdr = NULL;
 	UInt32 offset = sizeof(T_VTYSH_MSG_HDR);
 		
 	msg_hdr = (T_VTYSH_MSG_HDR *)ptr;
-	sessNum = ntohl(msg_hdr->sessNo);
-	if(sessNum != ctx->connSess)
-	{
-		vty_out(vty,"sessNo error");
-		return -1;
-	}
 	msgLen = ntohl(msg_hdr->msgLen);
-	
-
 	msgId = ntohl(msg_hdr->msgID);
 	switch(msgId)
 	{
@@ -329,14 +315,22 @@ void *vtysh_comm_recv_loop(void *ctx)
 	int addr_len = sizeof(struct sockaddr_in);
 
 	m_conn_ctx.cli_sock = -1;
-	m_conn_ctx.cli_sock = vtysh_command_socket();
+	m_conn_ctx.cli_sock = sock_g;
 
 	ictx->recv_running = 1;	
+    struct timeval tv;
+    int ret;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    if (setsockopt(sock_g, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        printf("socket option  SO_RCVTIMEO not support\n");
+        return NULL;
+    }
 
 	while(ictx->recv_running)
 	{
-		vtysh_command_wait_state(VTYSH_WAIT_RESP);
-
+		//vtysh_command_wait_state(VTYSH_WAIT_RESP);
+        
 		len = recvfrom(ictx->cli_sock,ictx->recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
 		if(len == 0)
 		{
@@ -344,12 +338,20 @@ void *vtysh_comm_recv_loop(void *ctx)
 		}
 		else if(len < 0)
 		{
-			printf( "recvfrom failed!\n" );
+		    /* 超时主线程不等 */	    
+		    if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
+		    {
+		        /* 提前按ctrl+c */
+                continue;
+		    }
+		    printf( "cmd execute timeout!\n" );
+		    vtysh_command_state_to(VTYSH_WAIT_INPUT);
 		}
     	else
 		{
 			ictx->recBufLen = len;
-			vtysh_command_state_to(VTYSH_WAIT_EXEC);
+			
+          //  vtysh_command_state_to(VTYSH_WAIT_RESP);
 			vtysh_parse_comm_ind(ictx);
 		}
 	}
@@ -362,7 +364,7 @@ SInt32 vtysh_command_wait_state(UInt32 state)
 {
 	while(m_conn_ctx.waitState != state)
 	{
-		sleep(1);
+		//sleep(1);
 	}
 	return 0;
 }
@@ -442,7 +444,7 @@ SInt32 vtysh_command_send_packet(T_VTYSH_CONN_CTX* ctx)
 	}
 
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(ctx->dstPort);
+	server_addr.sin_port = htons(ctx->dstPort + cellIndex_g);
     server_addr.sin_addr.s_addr = inet_addr(ctx->dstIp);
 
 	sendto(ctx->cli_sock, ctx->sndBuf, ctx->sndBufLen, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
@@ -459,40 +461,35 @@ void vtysh_sys_switch_node(struct vty *v, UInt32 node)
 }
 
 
-int vtysh_sys_cmd_connect(struct cmd_element *ce, struct vty *v, int argc, char **argv)
+int vtysh_sys_cmd_cell_select(struct cmd_element *ce, struct vty *v, int argc, char **argv)
 { 
-	char arg_ip[20];
-	unsigned short arg_port;
-	arg_ip[0] = '\0';
-	strcpy(arg_ip, argv[0]);
-	arg_port = (unsigned short)atoi(argv[1]);
+	char *str = argv[0];
 	
-	strcpy(m_conn_ctx.dstIp, arg_ip);
-	m_conn_ctx.dstPort = arg_port;
-	
-	vtysh_send_init_req(&m_conn_ctx);
-
-	vtysh_command_state_to(VTYSH_WAIT_RESP);
-
+	if((*str < '0') || (*str > '2'))
+	{
+        printf ("%% Invalid cellIndex, range(0~2).\n");
+        return 0;
+	}
+	cellIndex_g = (unsigned short)atoi(argv[0]);;
+	vty->node = CELL_NODE;
 	return 0;
 }
 
-int vtysh_sys_cmd_set(struct cmd_element *ce, struct vty *v, int argc, char **argv)
+int vtysh_cmd_quit(struct cmd_element *ce, struct vty *v, int argc, char **argv)
 {
-  unsigned short arg_port;
-	arg_port = (unsigned short)atoi(argv[0]);
-	m_conn_ctx.selfPort = arg_port;
-	m_conn_ctx.addr_update = 1;
+
+	main_is_running = 0;
 	
 	return 0;
 }
 
 
 extern UInt32 main_is_running;
-int vtysh_sys_cmd_exit(struct cmd_element *ce, struct vty *v, int argc, char **argv)
+int vtysh_cell_cmd_exit(struct cmd_element *ce, struct vty *v, int argc, char **argv)
 {
-	main_is_running = 0;
-	printf("Thank you for using, exitting...");
+	//main_is_running = 0;
+	vty->node = SYS_VIEW_NODE;
+	//printf("Thank you for using, exitting...");
 	return 0;
 }
 
@@ -502,23 +499,25 @@ SInt32 vtysh_command_ins_sys()
 	struct cmd_element *ce = NULL;
 	
 	ce = (struct cmd_element *)&(sys_cmd_connect);
-	ce->string = "connect to IP PORT";
-	ce->doc = "connect to a lte\r connect to a lte\r input the ip address of server:xxx.xxx.xxx.xxx\r input the port of server";
-	ce->func = vtysh_sys_cmd_connect;
+	ce->string = "cell Index";
+	//ce->doc = "choose a cell\r index of the cell(0;1;2)";
+	ce->doc = "choose a cell\r index(0,1,2)";
+	ce->func = vtysh_sys_cmd_cell_select;
 	cmd_install_element(SYS_VIEW_NODE, ce);
 
     ce = (struct cmd_element *)&(sys_cmd_exit);
 	ce->string = "exit";
-	ce->doc = "exit from client";
-	ce->func = vtysh_sys_cmd_exit;
-	cmd_install_element(SYS_VIEW_NODE, ce);
+	ce->doc = "exit to homepage";
+	ce->func = vtysh_cell_cmd_exit;
+	cmd_install_element(CELL_NODE, ce);
 
 
 	ce = (struct cmd_element *)&(sys_cmd_set);
-	ce->string = "set ip port IP PORT";
-	ce->doc = "set listen port , default port(60001)";
-	ce->func = vtysh_sys_cmd_set;
+	ce->string = "quit";
+	ce->doc = "end the program";
+	ce->func = vtysh_cmd_quit;
 	cmd_install_element(SYS_VIEW_NODE, ce);
+	cmd_install_element(CELL_NODE, ce);
 
 	return 0;
 }
@@ -527,18 +526,14 @@ SInt32 vtysh_command_ins_sys()
 
 SInt32 vtysh_command_init()
 {
-	//char *def_ip = "10.109.9.31"; 
+
 	memset(&m_conn_ctx, 0, sizeof(m_conn_ctx));
 
 	m_conn_ctx.connSess = vtysh_command_get_rand();
-	m_conn_ctx.pubFunc = vtysh_command_exec_func; 
+	m_conn_ctx.pubFunc = vtysh_command_exec_func; //没用
 	
-	m_conn_ctx.waitState = VTYSH_WAIT_NONE;
 	m_conn_ctx.sndBufLen = 0;
 	m_conn_ctx.recBufLen = 0;
-
-	//m_conn_ctx.selfPort = 60001;
-	//memcpy(m_conn_ctx.selfIp, def_ip, strlen(def_ip) + 1);
 	m_conn_ctx.addr_update = 1;
 
 	pthread_mutex_init(&(m_conn_ctx.state_mutex), NULL);

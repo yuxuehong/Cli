@@ -59,7 +59,7 @@ enum node_type
 	USER_NODE,			/* for user */
 	VTY_NODE,			/* Vty node. */
 	NPT_NODE,
-
+    CELL_NODE,
 	SYS_VIEW_NODE,
 };
 

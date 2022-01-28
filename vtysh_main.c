@@ -41,13 +41,17 @@
 
 static void my_sig(int sig)
 {
-	// ctrl+ c 
-	rl_replace_line("", 0);
-	rl_crlf();
-	rl_forced_update_display();
+	// ctrl+ c后可以敲命令
+
+        rl_replace_line("", 0);
+        rl_crlf();
+        rl_forced_update_display();
 }
 
-#if 0
+SOCKET sock_g;
+unsigned int cellIndex_g = 0;
+
+
 static void signal_init ()
 {
   signal (SIGINT, my_sig );
@@ -55,7 +59,7 @@ static void signal_init ()
   signal (SIGPIPE, SIG_IGN);
 
 }
-#endif
+
 
 static void in_show_welcome()
 {
@@ -72,6 +76,48 @@ static void in_show_welcome()
 	vty_out (vty, "%s\n", build);
 }
 
+void install_LteCommand()
+{
+    T_VTYSH_CONN_CTX t_Ctx = {0};
+    SOCKADDR_IN server_addr;
+    unsigned int addr_len = 0;
+
+    sock_g = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);  
+    if(sock_g  < 0)
+    {
+        printf("cli socket create failed\n");
+        return -1;
+    }
+	T_VTYSH_MSG_HDR *msg_hdr = NULL;
+	int len = 0;
+
+	msg_hdr = (T_VTYSH_MSG_HDR *)(t_Ctx.sndBuf);	
+	msg_hdr->msgID = htonl(VTYSH_INIT_REQ);
+	msg_hdr->msgLen = htonl(0);
+
+	t_Ctx.sndBufLen = sizeof(T_VTYSH_MSG_HDR);
+	strncpy(t_Ctx.dstIp, "10.109.9.31", 20);
+	t_Ctx.dstPort = 60000 + 0;//只去小区0搜集命令消息
+	t_Ctx.cli_sock = sock_g;
+	while(len <= 0)
+	{
+	    printf("send.\n");
+    	vtysh_command_send_packet(&t_Ctx);
+    	len = recvfrom(sock_g, t_Ctx.recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
+        if(len > 0)
+        {
+            t_Ctx.recBufLen = len;
+            vtysh_parse_comm_ind(&t_Ctx);
+            printf("connet ok!\n");
+        }
+    }
+    
+
+	return 0;
+    
+
+}
+
 /* VTY shell main routine. */
 
 UInt32 main_is_running = 1;
@@ -80,8 +126,8 @@ int main (int argc, char **argv, char **env)
 	char *line;
 //	int opt;
 
-  	/* Signal and others. */
-//	signal_init ();
+
+
 
 	/* Init the cmd */
 	cmd_init();
@@ -96,9 +142,16 @@ int main (int argc, char **argv, char **env)
 
 	in_show_welcome();
 
-	vtysh_command_init();
+	
 	
 	vtysh_command_ins_sys();
+
+	install_LteCommand();
+
+	vtysh_command_init();
+
+		  	/* Signal and others. */
+	signal_init ();
 	
 	vtysh_command_state_to(VTYSH_WAIT_INPUT);
 	
@@ -108,10 +161,14 @@ int main (int argc, char **argv, char **env)
 		vtysh_command_wait_state(VTYSH_WAIT_INPUT);		
 		line = vtysh_readline();
 		if(line != NULL)
-			vtysh_execute(line);
+		{
+			vtysh_execute(line);   
+			//vtysh_command_state_to(VTYSH_WAIT_RESP);
+        }
+        
 	}
 	//vtysh_command_destroy();
 	
-	printf ("\n");
+
 	exit (0);
 }

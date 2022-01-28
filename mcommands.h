@@ -43,7 +43,7 @@ typedef int SOCKET;
 #define VTYSH_DISCONN_REQ    (0x20200006)
 
 #define VTYSH_REC_BUFFER_SZ   20000
-#define VTYSH_SND_BUFFER_SZ   1000
+#define VTYSH_SND_BUFFER_SZ   20000
 
 #define VTYSH_CMD_MAX         3000
 
@@ -63,10 +63,8 @@ typedef int SOCKET;
 
 
 typedef struct{
-	UInt32 sessNo;
 	UInt32 msgID;
 	UInt32 msgLen;
-	char data[];
 }T_VTYSH_MSG_HDR;
 
 
@@ -166,15 +164,15 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
 SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx);
 UInt32 vtysh_command_get_rand();
 SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx);
-void* vtysh_comm_recv_loop(void *ctx);
+void *vtysh_comm_recv_loop(void *ctx);
 SInt32 vtysh_command_wait_state(UInt32 state);
 SInt32 vtysh_command_state_to(UInt32 state);
 SOCKET vtysh_command_socket();
 SInt32 vtysh_command_send_packet(T_VTYSH_CONN_CTX* ctx);
 void vtysh_sys_switch_node(struct vty *v, UInt32 node);
-int vtysh_sys_cmd_connect(struct cmd_element *ce, struct vty *v, int argc, char **argv);
-int vtysh_sys_cmd_set(struct cmd_element *ce, struct vty *v, int argc, char **argv);
-int vtysh_sys_cmd_exit(struct cmd_element *ce, struct vty *v, int argc, char **argv);
+int vtysh_sys_cmd_cell_select(struct cmd_element *ce, struct vty *v, int argc, char **argv);
+int vtysh_cmd_quit(struct cmd_element *ce, struct vty *v, int argc, char **argv);
+int vtysh_cell_cmd_exit(struct cmd_element *ce, struct vty *v, int argc, char **argv);
 SInt32 vtysh_command_ins_sys();
 SInt32 vtysh_command_init();
 SInt32 vtysh_command_destroy();
