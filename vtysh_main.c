@@ -42,10 +42,12 @@
 static void my_sig(int sig)
 {
 	// ctrl+ c∫Ûø…“‘«√√¸¡Ó
+        vtysh_command_state_to(VTYSH_WAIT_INPUT);
 
         rl_replace_line("", 0);
         rl_crlf();
         rl_forced_update_display();
+        
 }
 
 SOCKET sock_g;

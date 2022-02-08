@@ -39,6 +39,7 @@ typedef int(*VtyshCmd)(int argc, char **argv);
 typedef struct{ 
     UInt16 srcPort;
     UInt16 dstPort;
+    UInt32 seqNo;
     char   srcIp[20];
     char   dstIp[20];
     char   sendBuf[VTYSH_BUFFER_SZ];
@@ -57,6 +58,7 @@ typedef struct {
 typedef struct{
     UInt32 msgID;
     UInt32 msgLen;
+    UInt32 seqNo;
 }T_VTYSH_MSG_HDR;
 
 
@@ -213,6 +215,7 @@ SInt32 lteVtyshExecResp(UInt32 msgLen, char *msg)
     T_VTYSH_MSG_HDR *msg_hdr = (T_VTYSH_MSG_HDR *)(vtysh_ctx_g.sendBuf);
 
     msg_hdr->msgID = htonl(VTYSH_EXEC_RESP);
+    msg_hdr->seqNo = vtysh_ctx_g.seqNo;
     char *data = (char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR);
     
     if(msgLen+sizeof(T_VTYSH_MSG_HDR) > VTYSH_BUFFER_SZ)
@@ -327,6 +330,7 @@ UInt8  lteVtyshParseMsg(UInt8 *vtyshMsg, int len)
     msg_hdr = (T_VTYSH_MSG_HDR *)vtyshMsg;
     msgID = ntohl(msg_hdr->msgID);
     msgLen = ntohl(msg_hdr->msgLen);
+    vtysh_ctx_g.seqNo = msg_hdr->seqNo;
 	char *data = (char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR);
     switch(msgID)
     {

@@ -65,6 +65,7 @@ typedef int SOCKET;
 typedef struct{
 	UInt32 msgID;
 	UInt32 msgLen;
+	UInt32 seqNo;
 }T_VTYSH_MSG_HDR;
 
 
@@ -116,7 +117,7 @@ typedef struct{
 typedef struct{
 	SInt32 connState;
 	UInt32 connSess;
-	
+	UInt32 seqNo;
 	char selfIp[20];
 	UInt16 selfPort;
 	char dstIp[20];

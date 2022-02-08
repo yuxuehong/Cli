@@ -188,9 +188,11 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, cha
 	{
 		return -1;
 	}
-	
+
+	m_conn_ctx.seqNo++;//每个命令发送需要更新seqno;
 	msg_hdr = (T_VTYSH_MSG_HDR *)ctx->sndBuf;	
 	msg_hdr->msgID = htonl(VTYSH_EXEC_REQ);
+    msg_hdr->seqNo = htonl(m_conn_ctx.seqNo);
 
 	exec_req = (T_VTYSH_EXEC_REQ_HDR *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
 	exec_req->Idx = htonl(idx);
@@ -208,11 +210,12 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 {
 	T_VTYSH_MSG_HDR *exec_resp = NULL;
 	UInt32 msgId = 0;
+	UInt32 seqNo = 0;
 	char *data_ptr;
 
 	exec_resp = (T_VTYSH_MSG_HDR *)ctx->recBuf;
 	msgId = ntohl(exec_resp->msgID);
-	
+	seqNo = ntohl(exec_resp->seqNo);
     UInt32 data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
 	data_ptr = (char *)exec_resp + sizeof(T_VTYSH_MSG_HDR);
 	if(data_ptr[data_len-1] != '\0')
@@ -225,7 +228,11 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
     }
     else
     {
-	    printf("%s\n", data_ptr);
+        if(seqNo == m_conn_ctx.seqNo)
+        {
+	        printf("%s\n", data_ptr);
+	    }
+	    vtysh_command_state_to(VTYSH_WAIT_INPUT);
 	}
 	return 0;
 }
@@ -296,7 +303,7 @@ SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx)
 		
 	case VTYSH_EXEC_RESP:
 		ret = vtysh_proc_exec_resp(ctx, offset);
-		vtysh_command_state_to(VTYSH_WAIT_INPUT);
+		
 		break;
 	default:
 		break;	
@@ -329,7 +336,7 @@ void *vtysh_comm_recv_loop(void *ctx)
 
 	while(ictx->recv_running)
 	{
-		//vtysh_command_wait_state(VTYSH_WAIT_RESP);
+		//vtysh_command_wait_state(VTYSH_WAIT_RESP);不能加，如果加了，后面只要有一个回复延迟，就会导致后续命令seqno都对不上，进而导致都没法显示需要信息
         
 		len = recvfrom(ictx->cli_sock,ictx->recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
 		if(len == 0)
@@ -338,10 +345,10 @@ void *vtysh_comm_recv_loop(void *ctx)
 		}
 		else if(len < 0)
 		{
-		    /* 超时主线程不等 */	    
+		    /* 超时主线程不等 */
+		    
 		    if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
 		    {
-		        /* 提前按ctrl+c */
                 continue;
 		    }
 		    printf( "cmd execute timeout!\n" );
@@ -535,6 +542,7 @@ SInt32 vtysh_command_init()
 	m_conn_ctx.sndBufLen = 0;
 	m_conn_ctx.recBufLen = 0;
 	m_conn_ctx.addr_update = 1;
+    m_conn_ctx.seqNo = 0;
 
 	pthread_mutex_init(&(m_conn_ctx.state_mutex), NULL);
  	pthread_mutex_unlock(&(m_conn_ctx.state_mutex));
