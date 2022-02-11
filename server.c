@@ -34,7 +34,7 @@ typedef unsigned long long UInt64;
 
 int sockfd = -1;
  
-typedef int(*VtyshCmd)(int argc, char **argv);
+typedef int(*VtyshCmd)(char *data);
 
 typedef struct{ 
     UInt16 srcPort;
@@ -82,7 +82,7 @@ typedef struct{
 
 typedef struct{
     UInt32 Idx;
-    UInt32 ArgcLen;
+    UInt32 datalen;
     char data[];
 }T_VTYSH_EXEC_REQ_HDR;
 
@@ -92,6 +92,13 @@ typedef struct{
     UInt32 DataLen;
     char data[];
 }T_VTYSH_EXEC_RESP_HDR;
+
+typedef struct
+{
+    unsigned char Arglength;//参数长度
+    char data[];
+}T_argvInfo;
+
 
 //extern T_CmacDataCenter *ptCMACDataCenter_g;
 //extern tickType dlStatTempTick_g;
@@ -104,17 +111,59 @@ T_VTYSH_CTX vtysh_ctx_g;
 
 //extern int ulcmac_set_schedule_method(int argc, char *agrv);
 
-int print_Dci0Lost_method(int argc,char *argv)
+unsigned char ParseTlv(char *data, unsigned char argvIndex, unsigned int *argv)
 {
-	char CliBuf[20];
+    unsigned char i = 0;
+    T_argvInfo *ArgvHead = (T_argvInfo *)data;
+    T_argvInfo *ArgvInfo = ArgvHead + sizeof(T_argvInfo) + ArgvHead->Arglength;
+    unsigned char argvNum = (unsigned char)ArgvHead->data[0];
+    for(i = 0; i < argvNum; i++)
+    {
+        if(i == argvIndex)
+        {
+            *argv = atoi(ArgvInfo->data);
+            return 1;
+        }
+        ArgvInfo = (T_argvInfo *)((char *)ArgvInfo + sizeof(T_argvInfo) + ArgvInfo->Arglength);
+    }
+
+    return 0;
+}
+
+int print_Dci0Lost_method(char *data)
+{
+	char CliBuf[50];
 	int tmp = 2468;
+	unsigned int c1 = 0;
+	unsigned int c2 = 0;
+	unsigned char ret1 = 0;
+	unsigned char ret2 = 0;
+	int cli_msglen = 0;
 	//int cli_msglen = snprintf(CliBuf,20,"dci dtx cnt:%d",ptCMACDataCenter_g->cmacCellStat[mac_cellIndex_g].ueStat[ue_idx].wDciDtxCnt);
-	int cli_msglen = snprintf(CliBuf,20,"dci0 lost:%d",tmp);
-	sleep(10);
+    
+	ret1 = ParseTlv(data, 0, &c1);
+	ret2 = ParseTlv(data, 1, &c2);
+	if((ret1 !=0) &&(ret2 !=0))
+	{
+        cli_msglen = snprintf(CliBuf,50,"dci0 lost c1:%d, c2:%d",c1, c2);
+	}
+	else if(ret1 !=0)
+	{
+        cli_msglen = snprintf(CliBuf,50,"dci0 lost c1:%d",c1);
+	}
+	else if(ret2 !=0)
+	{
+        cli_msglen = snprintf(CliBuf,50,"dci0 lost c2:%d",c2);
+	}
+	else
+	{
+        cli_msglen = snprintf(CliBuf,50,"dci0 lost no argv");
+	}
+
 	lteVtyshExecResp(cli_msglen,CliBuf);
 	return 0;
 }
-int print_DciDtxCnt_method(int argc,char *argv)
+int print_DciDtxCnt_method(char *data)
 {
 	char CliBuf[20];
 	int tmp = 1234;
@@ -132,7 +181,9 @@ const T_VTYSH_COMMAND dlcmacVtyshCli_g[] =
 
 const T_VTYSH_COMMAND ulcmacVtyshCli_g[] = 
 {
-	{"pdcch dci0lost",0,  print_Dci0Lost_method,"pdcch info\r dci0 lost count"},
+	{"pdcch Dci0lost CD",2,  print_Dci0Lost_method,"pdcch info\r dci0 lost count"},
+	{"pdcch Dci0lost",1,  print_Dci0Lost_method,"pdcch info\r dci0 lost count"},
+	{"pdcch dci0lo",0,  print_Dci0Lost_method,"pdcch info\r dci0 lost count"},
 	{"pdcch dcidtxcnt",0, print_DciDtxCnt_method,"pdcch info\r dci lost count"}
 
 };
@@ -260,9 +311,6 @@ SInt32 lteVtyshParseInitReq(UInt32 dataLen, char *data)
     SInt32 ret;
 
 
- 
- 
-
     ret = lteVtyshSendCmdDescPart(&reg_idx);
     while(ret)
     {
@@ -271,16 +319,13 @@ SInt32 lteVtyshParseInitReq(UInt32 dataLen, char *data)
     return 1;
 }
 
-SInt32 lteVtyshParseExecReq(UInt32 dataLen, char *data)
+SInt32 lteVtyshParseExecReq(UInt32 msglen, char *data)
 {
     T_VTYSH_EXEC_REQ_HDR *exec_req = (T_VTYSH_EXEC_REQ_HDR*)data;
     UInt32 idx = ntohl(exec_req->Idx);
-    UInt32 arg_len = ntohl(exec_req->ArgcLen);
+    UInt32 dataLen = ntohl(exec_req->datalen);
     T_VTYSH_COMMAND *vtysh_cmd = NULL;
-    char *argv_data = NULL;
     SInt32 ret;	
-	int argc = 0;
-	char *argv[20];
 
     if(idx>=VTYSH_MAX_REQ_NUM || cmdVtyshAllReg_g[idx]==NULL)
     {      
@@ -289,7 +334,7 @@ SInt32 lteVtyshParseExecReq(UInt32 dataLen, char *data)
     }
 	
     vtysh_cmd = cmdVtyshAllReg_g[idx];
-    ret = vtysh_cmd->Func(argc, argv); 
+    ret = vtysh_cmd->Func(exec_req->data); 
 
     return ret;
 }

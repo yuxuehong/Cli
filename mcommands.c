@@ -28,11 +28,7 @@ int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, c
 {
 	T_VTYSH_COMMAND_ELE *cmd_ele; 
 	UInt32 idx; 
-	UInt32 arg_len = 0;
-	char arg_data[1000];
 	T_VTYSH_CONN_CTX *ictx;
-	SInt32 i = 0;
-
 	cmd_ele = (T_VTYSH_COMMAND_ELE *)ce;
 	
 	idx = cmd_ele->Idx;
@@ -45,26 +41,7 @@ int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, c
 	}
 	ictx = MY_CONTAINER_OF_CMD_ELE(ce, T_VTYSH_CONN_CTX,cmd_list, idx);//
 
-	arg_data[0] = '\0';
-	if(argc > 0)
-	{
-		strcpy(arg_data, argv[0]);
-		arg_len += strlen(argv[0]) + 1;
-		
-		for(i = 1; i<argc; i++)
-		{
-			strcpy(arg_data, " ");
-			strcpy(arg_data, argv[i]);
-			arg_len +=  strlen(argv[i]) + 1;
-		}
-   		//printf("%d,%d,%s",idx, arg_len, arg_data);
-		vtysh_send_exec_req(ictx, idx, arg_len, arg_data);
-	}
-	else
-	{
-		 m_conn_ctx.addr_update=1;
-   		 vtysh_send_exec_req(ictx, idx, 0, NULL);
-	}
+	vtysh_send_exec_req(ictx, idx, argc, argv);
 	vtysh_command_state_to(VTYSH_WAIT_RESP);
 	return 0;
 }
@@ -178,11 +155,16 @@ SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 }
 
 
-SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, char *arg_data)
+
+SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **argv)
 {
 	T_VTYSH_MSG_HDR *msg_hdr = NULL;
 	//UInt32 len = 0;
 	T_VTYSH_EXEC_REQ_HDR *exec_req = NULL;
+	unsigned char uArgcNum = argc;
+	unsigned short i = 0;
+	UInt32 dataLen = 0;
+	unsigned long long offset = OFFSET(T_argvInfo, data);
 
 	if(ctx == NULL)
 	{
@@ -196,10 +178,22 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, cha
 
 	exec_req = (T_VTYSH_EXEC_REQ_HDR *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
 	exec_req->Idx = htonl(idx);
-	exec_req->ArgcLen = htonl(arg_len);
-	if(arg_len > 0)
-		memcpy(exec_req->data, arg_data, arg_len);
-	ctx->sndBufLen = arg_len + sizeof(T_VTYSH_EXEC_REQ_HDR) + sizeof(T_VTYSH_MSG_HDR);
+	T_argvInfo *argvData = (T_argvInfo *)(exec_req->data);
+	
+    /* 第一个tlv指明有多少个参数 */
+    argvData->Arglength = sizeof(unsigned char);
+    memcpy(argvData->data, &uArgcNum, argvData->Arglength);
+    dataLen = offset + argvData->Arglength;
+    for(i = 0; i<argc; i++)
+	{
+		argvData = (T_argvInfo *)((unsigned char *)argvData + offset + argvData->Arglength);
+        argvData->Arglength =  strlen(argv[i]) + 1;
+        memcpy(argvData->data, argv[i], argvData->Arglength);
+        dataLen += offset + argvData->Arglength;
+	}
+ 
+	exec_req->datalen = htonl(dataLen);
+	ctx->sndBufLen = dataLen + sizeof(T_VTYSH_EXEC_REQ_HDR) + sizeof(T_VTYSH_MSG_HDR);
 
 	vtysh_command_send_packet(ctx);
 	return 0;
@@ -216,11 +210,16 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 	exec_resp = (T_VTYSH_MSG_HDR *)ctx->recBuf;
 	msgId = ntohl(exec_resp->msgID);
 	seqNo = ntohl(exec_resp->seqNo);
+	if(seqNo != m_conn_ctx.seqNo)
+	{
+	    /* 可能延时收到上次请求的包，过滤不显示 */
+        return 0;
+	}
     UInt32 data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
 	data_ptr = (char *)exec_resp + sizeof(T_VTYSH_MSG_HDR);
-	if(data_ptr[data_len-1] != '\0')
+	if(data_ptr[data_len] != '\0')
 	{
-		data_ptr[data_len-1] = '\0';
+		data_ptr[data_len] = '\0';
 	}
     if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
     {
@@ -228,10 +227,7 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
     }
     else
     {
-        if(seqNo == m_conn_ctx.seqNo)
-        {
-	        printf("%s\n", data_ptr);
-	    }
+	    printf("%s\n", data_ptr);    
 	    vtysh_command_state_to(VTYSH_WAIT_INPUT);
 	}
 	return 0;
@@ -345,8 +341,7 @@ void *vtysh_comm_recv_loop(void *ctx)
 		}
 		else if(len < 0)
 		{
-		    /* 超时主线程不等 */
-		    
+		    /* 超时主线程不等 */  
 		    if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
 		    {
                 continue;
@@ -357,8 +352,6 @@ void *vtysh_comm_recv_loop(void *ctx)
     	else
 		{
 			ictx->recBufLen = len;
-			
-          //  vtysh_command_state_to(VTYSH_WAIT_RESP);
 			vtysh_parse_comm_ind(ictx);
 		}
 	}

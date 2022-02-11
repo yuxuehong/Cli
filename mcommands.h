@@ -21,6 +21,8 @@
 
 
 #define MY_CONTAINER_OF_CMD_ELE(ptr, type, mem, idx)  ((type *)((char*)ptr - (char*)&(((type *)0)->mem[idx])))
+#define OFFSET(TYPE, MEM)   ((unsigned long long) &((TYPE*)0)->MEM) 
+
 
 
 typedef unsigned int    UInt32;
@@ -90,7 +92,7 @@ typedef struct{
 
 typedef struct{
 	UInt32 Idx;
-	UInt32 ArgcLen;
+	UInt32 datalen;/* data长度 */
 	char data[];
 }T_VTYSH_EXEC_REQ_HDR;
 
@@ -153,6 +155,12 @@ typedef enum{
 	VTYSH_WAIT_EXEC,
 }T_VTYSH_WAIT_STATE;
 
+typedef struct
+{
+    unsigned char Arglength;//参数长度
+    char data[];
+}T_argvInfo;
+
 
 int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, char **argv);
 SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx);
@@ -160,7 +168,7 @@ SInt32 vtysh_proc_init_resp_fail(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
 SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 argc, 
                                      char *cmd_str, UInt32 cmd_len, char *help_str, UInt32 help_len);
 SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
-SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, UInt32 arg_len, char *arg_data);
+SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **argv);
 SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
 SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx);
 UInt32 vtysh_command_get_rand();

@@ -101,16 +101,17 @@ void install_LteCommand()
 	strncpy(t_Ctx.dstIp, "10.109.9.31", 20);
 	t_Ctx.dstPort = 60000 + 0;//只去小区0搜集命令消息
 	t_Ctx.cli_sock = sock_g;
+
+    printf("connecting...\n");
 	while(len <= 0)
-	{
-	    printf("send.\n");
+	{  
     	vtysh_command_send_packet(&t_Ctx);
     	len = recvfrom(sock_g, t_Ctx.recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
         if(len > 0)
         {
             t_Ctx.recBufLen = len;
             vtysh_parse_comm_ind(&t_Ctx);
-            printf("connet ok!\n");
+            printf("conneted!\n");
         }
     }
     
