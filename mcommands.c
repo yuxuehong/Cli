@@ -15,6 +15,7 @@ extern UInt32 main_is_running;
 extern struct vty *vty;
 extern SOCKET sock_g;
 extern unsigned char cellIndex_g;
+extern T_GlobalConfig g_GlobalInfo;
 typedef struct sockaddr_in SOCKADDR_IN;
 typedef int SOCKET;
 
@@ -47,12 +48,11 @@ int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, c
 }
 
 
-
+/*
 SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx)
 {
 	T_VTYSH_MSG_HDR *msg_hdr = NULL;
 	UInt32 len = 0;
-	T_VTYSH_INIT_REQ *init_req = NULL;
 
 	if(ctx == NULL)
 	{
@@ -68,7 +68,7 @@ SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx)
 	
 	vtysh_command_send_packet(ctx);
 	return 0;
-}
+}*/
 
 
 SInt32 vtysh_proc_init_resp_fail(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
@@ -164,6 +164,7 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **ar
 	unsigned char uArgcNum = argc;
 	unsigned short i = 0;
 	UInt32 dataLen = 0;
+	T_argvInfo *argvData = NULL;
 	unsigned long long offset = OFFSET(T_argvInfo, data);
 
 	if(ctx == NULL)
@@ -178,7 +179,7 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **ar
 
 	exec_req = (T_VTYSH_EXEC_REQ_HDR *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
 	exec_req->Idx = htonl(idx);
-	T_argvInfo *argvData = (T_argvInfo *)(exec_req->data);
+	argvData = (T_argvInfo *)(exec_req->data);
 	
     /* 第一个tlv指明有多少个参数 */
     argvData->Arglength = sizeof(unsigned char);
@@ -203,16 +204,17 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **ar
 SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 {
 	T_VTYSH_MSG_HDR *exec_resp = NULL;
-	UInt32 msgId = 0;
 	UInt32 seqNo = 0;
 	char *data_ptr;
 
 	exec_resp = (T_VTYSH_MSG_HDR *)ctx->recBuf;
-	msgId = ntohl(exec_resp->msgID);
 	seqNo = ntohl(exec_resp->seqNo);
-	if(seqNo != m_conn_ctx.seqNo)
+	
+	if((m_conn_ctx.waitState == VTYSH_WAIT_INPUT) || (seqNo != m_conn_ctx.seqNo) || (exec_resp->cellIndex != cellIndex_g))
 	{
-	    /* 可能延时收到上次请求的包，过滤不显示 */
+	    /* 1、待输入状态下，收到服务端的延时包，需过滤
+	    2、cmd2请求后可能先收到cmd1的延时ack包，需过滤
+	    3、已经切换到其他小区视图下，统一过滤不显示 */
         return 0;
 	}
     UInt32 data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
@@ -233,7 +235,7 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 	return 0;
 }
 
-
+/*
 SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx)
 {
 	T_VTYSH_MSG_HDR *msg_hdr = NULL;
@@ -258,7 +260,7 @@ SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx)
 	vtysh_command_send_packet(ctx);
 	
 	return 0;
-}
+}*/
 
 
 UInt32 vtysh_command_get_rand()
@@ -278,6 +280,11 @@ SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx)
 		
 	msg_hdr = (T_VTYSH_MSG_HDR *)ptr;
 	msgLen = ntohl(msg_hdr->msgLen);
+	if(msgLen + offset > sizeof(ctx->recBuf))
+	{
+        printf("recv msg len out of range, msgLen = %d.\n", msgLen);
+        return -1;
+	}
 	msgId = ntohl(msg_hdr->msgID);
 	switch(msgId)
 	{
@@ -315,24 +322,19 @@ void *vtysh_comm_recv_loop(void *ctx)
 	T_VTYSH_CONN_CTX *ictx = (T_VTYSH_CONN_CTX*)ctx;
 	SOCKADDR_IN server_addr;
 	int len = 0;
-	int addr_len = sizeof(struct sockaddr_in);
-
-	m_conn_ctx.cli_sock = -1;
-	m_conn_ctx.cli_sock = sock_g;
-
-	ictx->recv_running = 1;	
+	int addr_len = 0;
     struct timeval tv;
-    int ret;
-    tv.tv_sec = 5;
+    tv.tv_sec = g_GlobalInfo.ClientTimeOut;
     tv.tv_usec = 0;
-    if (setsockopt(sock_g, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+    if (setsockopt(ictx->cli_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
         printf("socket option  SO_RCVTIMEO not support\n");
         return NULL;
     }
+    m_conn_ctx.recv_running = 1;
 
-	while(ictx->recv_running)
+	while(m_conn_ctx.recv_running)
 	{
-		//vtysh_command_wait_state(VTYSH_WAIT_RESP);不能加，如果加了，后面只要有一个回复延迟，就会导致后续命令seqno都对不上，进而导致都没法显示需要信息
+		vtysh_command_wait_state(VTYSH_WAIT_RESP);//不能加，如果加了，后面只要有一个回复延迟，就会导致后续命令seqno都对不上，进而导致都没法显示需要信息
         
 		len = recvfrom(ictx->cli_sock,ictx->recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
 		if(len == 0)
@@ -342,7 +344,7 @@ void *vtysh_comm_recv_loop(void *ctx)
 		else if(len < 0)
 		{
 		    /* 超时主线程不等 */  
-		    if(m_conn_ctx.waitState == VTYSH_WAIT_INPUT)
+		    if(ictx->waitState == VTYSH_WAIT_INPUT)
 		    {
                 continue;
 		    }
@@ -355,6 +357,8 @@ void *vtysh_comm_recv_loop(void *ctx)
 			vtysh_parse_comm_ind(ictx);
 		}
 	}
+
+	return NULL;
 }
 
 
@@ -479,7 +483,7 @@ int vtysh_cmd_quit(struct cmd_element *ce, struct vty *v, int argc, char **argv)
 {
 
 	main_is_running = 0;
-	
+	//vtysh_command_destroy();
 	return 0;
 }
 
@@ -497,13 +501,14 @@ int vtysh_cell_cmd_exit(struct cmd_element *ce, struct vty *v, int argc, char **
 SInt32 vtysh_command_ins_sys()
 {
 	struct cmd_element *ce = NULL;
-	
+
 	ce = (struct cmd_element *)&(sys_cmd_connect);
 	ce->string = "cell Index";
 	//ce->doc = "choose a cell\r index of the cell(0;1;2)";
 	ce->doc = "choose a cell\r index(0,1,2)";
 	ce->func = vtysh_sys_cmd_cell_select;
 	cmd_install_element(SYS_VIEW_NODE, ce);
+
 
     ce = (struct cmd_element *)&(sys_cmd_exit);
 	ce->string = "exit";
@@ -526,15 +531,10 @@ SInt32 vtysh_command_ins_sys()
 
 SInt32 vtysh_command_init()
 {
-
-	memset(&m_conn_ctx, 0, sizeof(m_conn_ctx));
-
-	m_conn_ctx.connSess = vtysh_command_get_rand();
-	m_conn_ctx.pubFunc = vtysh_command_exec_func; //没用
+//	m_conn_ctx.pubFunc = vtysh_command_exec_func; //没用
 	
 	m_conn_ctx.sndBufLen = 0;
 	m_conn_ctx.recBufLen = 0;
-	m_conn_ctx.addr_update = 1;
     m_conn_ctx.seqNo = 0;
 
 	pthread_mutex_init(&(m_conn_ctx.state_mutex), NULL);

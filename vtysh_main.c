@@ -38,7 +38,13 @@
 /* Initialization of signal handles. */
 #include <readline/readline.h>
 #include <readline/history.h>
+#include "cJSON.h"
 
+
+
+
+T_GlobalConfig g_GlobalInfo = {0};
+extern T_VTYSH_CONN_CTX m_conn_ctx;
 static void my_sig(int sig)
 {
 	// ctrl+ c后可以敲命令
@@ -51,7 +57,7 @@ static void my_sig(int sig)
 }
 
 SOCKET sock_g;
-unsigned int cellIndex_g = 0;
+unsigned char cellIndex_g = 0;
 
 
 static void signal_init ()
@@ -80,7 +86,7 @@ static void in_show_welcome()
 
 void install_LteCommand()
 {
-    T_VTYSH_CONN_CTX t_Ctx = {0};
+    memset(&m_conn_ctx, 0, sizeof(m_conn_ctx));
     SOCKADDR_IN server_addr;
     unsigned int addr_len = 0;
 
@@ -88,36 +94,95 @@ void install_LteCommand()
     if(sock_g  < 0)
     {
         printf("cli socket create failed\n");
-        return -1;
+        return;
     }
 	T_VTYSH_MSG_HDR *msg_hdr = NULL;
 	int len = 0;
 
-	msg_hdr = (T_VTYSH_MSG_HDR *)(t_Ctx.sndBuf);	
+	msg_hdr = (T_VTYSH_MSG_HDR *)(m_conn_ctx.sndBuf);	
 	msg_hdr->msgID = htonl(VTYSH_INIT_REQ);
+	msg_hdr->period = g_GlobalInfo.ServerGetPeirod;
 	msg_hdr->msgLen = htonl(0);
 
-	t_Ctx.sndBufLen = sizeof(T_VTYSH_MSG_HDR);
-	strncpy(t_Ctx.dstIp, "10.109.9.31", 20);
-	t_Ctx.dstPort = 60000 + 0;//只去小区0搜集命令消息
-	t_Ctx.cli_sock = sock_g;
+	m_conn_ctx.sndBufLen = sizeof(T_VTYSH_MSG_HDR);
+	strncpy(m_conn_ctx.dstIp, g_GlobalInfo.ip, 20);
+	m_conn_ctx.dstPort = g_GlobalInfo.port + 0;//只去小区0搜集命令消息
+	m_conn_ctx.cli_sock = sock_g;
 
     printf("connecting...\n");
 	while(len <= 0)
 	{  
-    	vtysh_command_send_packet(&t_Ctx);
-    	len = recvfrom(sock_g, t_Ctx.recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
+    	vtysh_command_send_packet(&m_conn_ctx);
+    	len = recvfrom(sock_g, m_conn_ctx.recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
         if(len > 0)
         {
-            t_Ctx.recBufLen = len;
-            vtysh_parse_comm_ind(&t_Ctx);
+            m_conn_ctx.recBufLen = len;
+            vtysh_parse_comm_ind(&m_conn_ctx);
             printf("conneted!\n");
         }
     }
     
 
-	return 0;
+	return;
     
+
+}
+
+void global_init()
+{
+    strncpy(g_GlobalInfo.ip, "10.11.1.131", 20);
+    g_GlobalInfo.port = 60000;
+    g_GlobalInfo.ClientTimeOut = 10;
+    g_GlobalInfo.ServerGetPeirod = 1;
+}
+
+
+void parse_global_config()
+{
+    FILE *f;
+	int len = 0;
+    char * jsonStr = NULL;
+    cJSON * root = NULL;
+	cJSON * object = NULL;
+    cJSON * item = NULL;//cjson对象
+	
+	f = fopen("Config.txt","r");
+	if(NULL == f)
+	{
+        return;
+	}
+	fseek(f, 0, SEEK_END);
+	len = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	
+	jsonStr = (char *)malloc((len + 1)* sizeof(char));
+	fread(jsonStr, 1, len, f);
+	fclose(f);
+
+    root = cJSON_Parse(jsonStr);     
+    if (!root) 
+    {
+        printf("Parse JSON Error.\n");
+    }
+    else
+    {
+        object = cJSON_GetObjectItem(root, "ServerPara");
+		item = cJSON_GetObjectItem(object, "ServerIpAddress");
+		strncpy(g_GlobalInfo.ip,item->valuestring,sizeof(g_GlobalInfo.ip));
+		item = cJSON_GetObjectItem(object, "ServerPort");
+		g_GlobalInfo.port = item->valueint;
+		item = cJSON_GetObjectItem(object, "ServerGetPeriod");
+		g_GlobalInfo.ServerGetPeirod = item->valueint;
+        
+
+		object = cJSON_GetObjectItem(root, "ClientPara");
+		item = cJSON_GetObjectItem(object, "RecvTimeOut");
+		g_GlobalInfo.ClientTimeOut = item->valueint;
+		cJSON_Delete(root);
+    }
+	
+	free(jsonStr);
+    return; 
 
 }
 
@@ -145,7 +210,9 @@ int main (int argc, char **argv, char **env)
 
 	in_show_welcome();
 
-	
+    global_init();
+    
+	parse_global_config();
 	
 	vtysh_command_ins_sys();
 

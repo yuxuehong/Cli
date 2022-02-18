@@ -44,8 +44,8 @@ typedef int SOCKET;
 #define VTYSH_EXEC_RESP      (0x20200005)
 #define VTYSH_DISCONN_REQ    (0x20200006)
 
-#define VTYSH_REC_BUFFER_SZ   20000
-#define VTYSH_SND_BUFFER_SZ   20000
+#define VTYSH_REC_BUFFER_SZ   60000
+#define VTYSH_SND_BUFFER_SZ   60000
 
 #define VTYSH_CMD_MAX         3000
 
@@ -68,6 +68,9 @@ typedef struct{
 	UInt32 msgID;
 	UInt32 msgLen;
 	UInt32 seqNo;
+	UInt8 cellIndex;
+	UInt8 period;/* 服务端数据采样周期 */
+	UInt8 ucPad[2];
 }T_VTYSH_MSG_HDR;
 
 
@@ -117,15 +120,12 @@ typedef struct{
 
 
 typedef struct{
-	SInt32 connState;
-	UInt32 connSess;
 	UInt32 seqNo;
 	char selfIp[20];
 	UInt16 selfPort;
 	char dstIp[20];
 	UInt16 dstPort;
 
-	UInt32 addr_update;
 	UInt32 sndBufLen;
 	char   sndBuf[VTYSH_SND_BUFFER_SZ];
 	UInt32 recBufLen;
@@ -136,8 +136,6 @@ typedef struct{
 	UInt32 recv_running;
 
 	UInt32 waitState;
-	UInt32 waitTime;     // 鍗曚綅 100ms
-	UInt32 waitTimeout;  // 
 	pthread_mutex_t state_mutex;
 
 	SOCKET cli_sock;
@@ -161,16 +159,24 @@ typedef struct
     char data[];
 }T_argvInfo;
 
+typedef struct
+{
+   char ip[20]; /* 服务器IP */
+   unsigned char ServerGetPeirod;   /* 服务端数据统计周期 */
+   unsigned char ClientTimeOut;     /* 客户端查询超时时间 */
+   unsigned char ucPad[2];
+   int port;                /* 服务端端口号 */
+}T_GlobalConfig;
 
 int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, char **argv);
-SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx);
+//SInt32 vtysh_send_init_req(T_VTYSH_CONN_CTX *ctx);
 SInt32 vtysh_proc_init_resp_fail(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
 SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 argc, 
                                      char *cmd_str, UInt32 cmd_len, char *help_str, UInt32 help_len);
 SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
 SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, char **argv);
 SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset);
-SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx);
+//SInt32 vtysh_send_disconn_req(T_VTYSH_CONN_CTX *ctx);
 UInt32 vtysh_command_get_rand();
 SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx);
 void *vtysh_comm_recv_loop(void *ctx);
