@@ -1854,7 +1854,6 @@ int cmd_execute_system_command (char *command, int argc, char **argv)
 {
     int ret;
  /*   pid_t pid;     gysh*/
-    int status;
 
     /* Call fork(). */
 //    pid = fork ();
