@@ -320,7 +320,7 @@ int waitToSendNextReq()
         changeMode(0);
         while(((m_conn_ctx.waitState != VTYSH_WAIT_INPUT)) && ((c = getchar()) != EOF))
         {
-            if(c == ' ')
+            if(c == '\n')
             {                         
                 return 1;
             }
@@ -346,14 +346,16 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 
 	data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
 	data_ptr = (char *)RecvHead + sizeof(T_VTYSH_MSG_HDR);
-	/* 解决多包显示多一行问题 */
-	if(data_ptr[data_len - 1] == '\n')
+	if(data_len > 0)
 	{
-		data_ptr[data_len - 1] = '\0';
-	}
+    	/* 解决多包显示多一行问题 */
+    	if(data_ptr[data_len - 1] == '\n')
+    	{
+    		data_ptr[data_len - 1] = '\0';
+    	}
 
-    printf("%s\n", data_ptr);
-
+        printf("%s\n", data_ptr);
+    }
     if(RecvHead->t_LastData.lastFlag == TRUE)
     {
         /* 翻转状态并结束 */               
@@ -389,6 +391,7 @@ SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx)
 	msgLen = ntohl(msg_hdr->msgLen);
 	if((msgLen + offset > sizeof(ctx->recBuf)) || (ctx->recBufLen < offset))
 	{
+	    vtysh_command_state_to(VTYSH_WAIT_INPUT);
         printf("recv msg len out of range, msgLen = %d.\n", msgLen);
         return -1;
 	}
