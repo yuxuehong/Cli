@@ -32,12 +32,14 @@ int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, c
     SInt32 ret = -1;
 	T_VTYSH_COMMAND_ELE *cmd_ele; 
 	UInt32 idx; 
+	UInt32 cmdId;
 	T_VTYSH_CONN_CTX *ictx;
 	cmd_ele = (T_VTYSH_COMMAND_ELE *)ce;
 	
 	idx = cmd_ele->Idx;
+    cmdId = cmd_ele->cmdId;
 
-	if(argc != cmd_ele->Argc)
+	if(argc > cmd_ele->Argc)
 	{
 
 		vty_out(vty,"vtysh_command_exec_func: argc num is error! Current Argc:%d, Register Argc:%d \n", argc,  cmd_ele->Argc);
@@ -45,7 +47,7 @@ int vtysh_command_exec_func(struct cmd_element *ce, struct vty *vty, int argc, c
 	}
 	ictx = MY_CONTAINER_OF_CMD_ELE(ce, T_VTYSH_CONN_CTX,cmd_list, idx);//
 
-	ret = vtysh_send_exec_req(ictx, idx, argc, cmd_ele->ArgType, argv);
+	ret = vtysh_send_exec_req(ictx, idx, cmdId, argc, cmd_ele->ArgType, argv);
 	if(ret == 0)
 	{
 	    vtysh_command_state_to(VTYSH_WAIT_RESP);
@@ -98,14 +100,14 @@ SInt32 vtysh_proc_exec_resp_fail(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 {
     T_VTYSH_MSG_HDR * msgRcvhdr = NULL;
     msgRcvhdr = (T_VTYSH_MSG_HDR *)m_conn_ctx.recBuf;
-    CHECKNEEDSHOW(msgRcvhdr);
+    CHECK_NEED_SHOW(msgRcvhdr);
 	UInt8 *ptr = (UInt8*)(ctx->recBuf+offset);
 	printf("%s", ptr);
 	return 0;
 }
 
 
-SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 argc, T_ArgvType *ArgvType,
+SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 cmdId, UInt32 argc, T_ArgvType *ArgvType,
                                      char *cmd_str, UInt32 cmd_len, char *help_str, UInt32 help_len)
 {
 	SInt32 ret = 0;
@@ -127,10 +129,13 @@ SInt32 vtysh_install_command(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 argc, T_A
 	cmd_ele->Argc = argc;
 	memcpy(cmd_ele->ArgType, ArgvType, sizeof(cmd_ele->ArgType));
 	cmd_ele->Idx = idx;
+	cmd_ele->cmdId = cmdId;
 	cmd_ele->cmd_str = (char*)malloc(cmd_len+2);
+	memset(cmd_ele->cmd_str, 0, cmd_len+2);
 	memcpy(cmd_ele->cmd_str, cmd_str, cmd_len);
 	cmd_ele->cmd_str[cmd_len] = '\0';
 	cmd_ele->help_str = (char *)malloc(help_len+2);
+	memset(cmd_ele->help_str, 0, help_len+2);
 	memcpy(cmd_ele->help_str, help_str, help_len);
 	cmd_ele->help_str[help_len] = '\0';
 
@@ -151,9 +156,11 @@ SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 	UInt16 cmdstr_len;
 	UInt16 helpstr_len;
 	UInt32 mIdx;
+	UInt32 cmdId;
 	UInt32 mArgc;
     T_ArgvType ArgvType[MAX_ARGV_NUM] = {0};
 	UInt8 i = 0;
+	T_VTYSH_MSG_HDR * msg_hdr = (T_VTYSH_MSG_HDR *)ctx->recBuf;
 
 	while(left_byte > 0)
 	{	
@@ -166,6 +173,7 @@ SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 		cmdstr_len = ntohs(cmd_desc->cmdLineLen);
 		helpstr_len = ntohs(cmd_desc->cmdHelpLen);
 		mIdx = ntohl(cmd_desc->Idx);
+		cmdId = ntohl(cmd_desc->cmdId);
 		mArgc = ntohl(cmd_desc->Argc);
 		for(i = 0; i < mArgc; i++)
 		{
@@ -175,13 +183,18 @@ SInt32 vtysh_proc_init_resp_succ(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 		{
 			break;
 		}
-		vtysh_install_command(ctx, mIdx, mArgc, ArgvType, (char*)cmd_desc->data,cmdstr_len,    
+		vtysh_install_command(ctx, mIdx, cmdId, mArgc, ArgvType, (char*)cmd_desc->data,cmdstr_len,    
                                                 (char*)(cmd_desc->data+cmdstr_len),helpstr_len);
 
 		left_byte -= cmdstr_len + helpstr_len + sizeof(T_VTYSH_CMD_DESC_HDR);
 		ptr += cmdstr_len + helpstr_len + sizeof(T_VTYSH_CMD_DESC_HDR);
 	}
-	return 0;
+
+	if(msg_hdr->lastFlag)
+	{
+        return 0;
+	}
+	return -1;
 }
 
 void PackageExecMsgHead(T_VTYSH_MSG_HDR *msg_hdr, UInt32 msgLen, bool firstFlag)
@@ -191,7 +204,7 @@ void PackageExecMsgHead(T_VTYSH_MSG_HDR *msg_hdr, UInt32 msgLen, bool firstFlag)
     msg_hdr->seqNo = htonl(m_conn_ctx.seqNo);
     msg_hdr->msgLen = htonl(msgLen);
     msg_hdr->period = m_conn_ctx.stGlobalConf.ServerGetPeirod;
-    msg_hdr->t_LastData.firstFlag = firstFlag;
+    msg_hdr->firstFlag = firstFlag;
     
     return;
 }
@@ -200,7 +213,7 @@ bool checkArgvVaild(T_ArgvType type, char *str)
 {
     if(ARGV_TYPE_DIGITAL == type)
     {
-        if ((strspn(str, "0123456789") != strlen(str)) || ((strlen(str) > 1) && (str[0] == '0')))
+        if ((NULL == str) || (strspn(str, "0123456789") != strlen(str)) || ((strlen(str) > 1) && (str[0] == '0')))
         {
             printf("parameter is invaild.\n");
             return FALSE;
@@ -219,21 +232,22 @@ bool PackageExecInfo(T_VTYSH_CONN_CTX *ctx, bool firstFlag, int argc, T_ArgvType
     unsigned short i = 0;
     UInt32 dataLen = 0;
     bool checkRet = TRUE;
+    unsigned char ucArgNum = (unsigned char)argc;
     unsigned long long offset = OFFSET(T_argvInfo, data);
 
     msg_hdr = (T_VTYSH_MSG_HDR *)ctx->sndBuf;	
 	
     exec_req = (T_VTYSH_EXEC_REQ_HDR *)((char *)msg_hdr + sizeof(T_VTYSH_MSG_HDR));
-    exec_req->Idx = htonl(m_conn_ctx.CurCmdIdx);
+    exec_req->Idx = htonl(m_conn_ctx.CurCmdIndex);
     argvData = (T_argvInfo *)(exec_req->data);
         
     /* 第一个tlv指明有多少个参数 */
     argvData->ArgvType = htonl(ARGV_TYPE_TOTALNUM);
 	argvData->Arglength = sizeof(unsigned char);	
-    memcpy(argvData->data, &argc, argvData->Arglength);
+    memcpy(argvData->data, &ucArgNum, argvData->Arglength);
     dataLen = offset + argvData->Arglength;
 	
-    for(i = 0; i < argc; i++)
+    for(i = 0; i < ucArgNum; i++)
     {	
 		if(TRUE == firstFlag)
         {
@@ -258,7 +272,7 @@ bool PackageExecInfo(T_VTYSH_CONN_CTX *ctx, bool firstFlag, int argc, T_ArgvType
     return TRUE;
 }
 
-SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, T_ArgvType *ArgType,char **argv)
+SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx, UInt32 idx, UInt32 cmdId, int argc, T_ArgvType *ArgType,char **argv)
 {
     bool Ret = FALSE;
 	if(ctx == NULL)
@@ -267,7 +281,8 @@ SInt32 vtysh_send_exec_req(T_VTYSH_CONN_CTX *ctx,UInt32 idx, int argc, T_ArgvTyp
 	}
 
 	m_conn_ctx.seqNo++;//每个命令刚开始发送需要更新seqno;
-    m_conn_ctx.CurCmdIdx = idx;/* 保存当前命令idx以备后续分包使用 */
+    m_conn_ctx.CurCmdIndex = idx;/* 保存当前命令索引以备后续分包使用 */
+    m_conn_ctx.CurCmdId = cmdId;/* 保存当前命令Id，在分包时需要区分lastdata参数类型 */
     memset(m_conn_ctx.sndBuf, 0, sizeof(m_conn_ctx.sndBuf));
     Ret = PackageExecInfo(ctx, TRUE, argc, ArgType, argv);
     if(FALSE == Ret)
@@ -296,22 +311,49 @@ void changeMode(int mode)
     }
 }
 
-
-/* 目前参数只支持UeIndex */
-void send_req_server(T_VTYSH_CONN_CTX *ctx, T_VTYSH_MSG_HDR *RecvHdr, UInt8 uArgcNum)
+void Get_Para_LastUeIndex(T_UeIndexLastData *lastData, int *ptArgc, T_ArgvType *ptArgType, char **argv)
 {
-    char *argv[1] = {NULL};
+    UInt16 UeIndex = 0;
     char argvTmp[10] = {0};
-    T_ArgvType ArgType[MAX_ARGV_NUM] = {0};
-	UInt16 UeIndex = ntohs(RecvHdr->t_LastData.lastUeIndex);
-
+    
+    UeIndex = ntohs(lastData->lastUeIndex);
     snprintf(argvTmp, 10, "%u", UeIndex);
     argv[0] = argvTmp;
-    ArgType[0] = ARGV_TYPE_DIGITAL;
+    ptArgType[0] = ARGV_TYPE_DIGITAL;
+    *ptArgc = 1;
+    
+    return;
+}
 
 
-	PackageExecInfo(ctx, FALSE, uArgcNum, ArgType, argv);
+/* 目前参数只支持UeIndex */
+void send_req_server(T_VTYSH_CONN_CTX *ctx, char *LastData)
+{
+    int argc = 0;
+    char *argv[MAX_ARGV_NUM] = {NULL};
+    T_ArgvType ArgType[MAX_ARGV_NUM] = {0};
 
+    switch(m_conn_ctx.CurCmdId)
+    {
+        case SHOW_UE_TOTAL_CQI_CMDID:
+        case SHOW_UE_TOTAL_DL_MCS_CMDID:
+        case SHOW_UE_TOTAL_UL_MCS_CMDID:
+        case SHOW_UE_TOTAL_UL_SINR_CMDID:
+        case SHOW_UE_TOTAL_ULSCH_CNT_CMDID:
+        case SHOW_UE_TOTAL_DLSCH_CNT_CMDID:
+        case SHOW_UE_TOTAL_DLRB_CNT_CMDID:
+        case SHOW_UE_TOTAL_ULRB_CNT_CMDID:
+        case SHOW_UE_TOTAL_PHR_CMDID:
+            Get_Para_LastUeIndex((T_UeIndexLastData *)LastData, &argc, ArgType, argv);
+        break;
+        default:
+            vtysh_command_state_to(VTYSH_WAIT_INPUT);  
+            printf("Err cmdid(0x%x)!\n", m_conn_ctx.CurCmdId);
+        return;
+    }
+
+
+	PackageExecInfo(ctx, FALSE, argc, ArgType, argv);
 }
 
 int waitToSendNextReq()
@@ -342,7 +384,7 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 	UInt32 data_len= 0;
 
 	RecvHead = (T_VTYSH_MSG_HDR *)ctx->recBuf;
-	CHECKNEEDSHOW(RecvHead);
+	CHECK_NEED_SHOW(RecvHead);
 
 	data_len=(ctx->recBufLen)-sizeof(T_VTYSH_MSG_HDR);
 	data_ptr = (char *)RecvHead + sizeof(T_VTYSH_MSG_HDR);
@@ -356,19 +398,19 @@ SInt32 vtysh_proc_exec_resp(T_VTYSH_CONN_CTX *ctx, UInt32 offset)
 
         printf("%s\n", data_ptr);
     }
-    if(RecvHead->t_LastData.lastFlag == TRUE)
+    if(RecvHead->lastFlag == TRUE)
     {
         /* 翻转状态并结束 */               
 	    vtysh_command_state_to(VTYSH_WAIT_INPUT);  
     }
     else
     {
-        /* 等待用户输入空格，再发下个请求包 */
+        /* 等待用户输入换行，再发下个请求包 */
         ret = waitToSendNextReq();
         changeMode(1); 
         if(ret == 1)
         {
-            send_req_server(ctx, RecvHead, 1);/* 当前只支持一个参数 */
+            send_req_server(ctx, RecvHead->LastData);
         }
     }
 
@@ -406,14 +448,14 @@ SInt32 vtysh_parse_comm_ind(T_VTYSH_CONN_CTX         *ctx)
 		ret = vtysh_proc_init_resp_succ(ctx, offset);
 		if(ret == 0)
 		{
+		    printf("register cmd success!\n");
 			vtysh_command_state_to(VTYSH_WAIT_INPUT);
 		}
 		else
 		{
-			vtysh_command_state_to(VTYSH_WAIT_RESP);
+			vtysh_command_state_to(VTYSH_INIT_SUCCESS);
 		}
 		break;
-		
 	case VTYSH_EXEC_SUCC_RESP:
 		ret = vtysh_proc_exec_resp(ctx, offset);
 		break;
@@ -432,13 +474,7 @@ void *vtysh_comm_recv_loop(void *ctx)
 	SOCKADDR_IN server_addr;
 	int len = 0;
 	int addr_len = 0;
-    struct timeval tv;
-    tv.tv_sec = m_conn_ctx.stGlobalConf.ClientTimeOut;
-    tv.tv_usec = 0;
-    if (setsockopt(ictx->cli_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        printf("socket option  SO_RCVTIMEO not support\n");
-        return NULL;
-    }
+   
 
 	while(1)
 	{
@@ -551,7 +587,7 @@ SInt32 vtysh_command_send_packet(T_VTYSH_CONN_CTX* ctx)
 	SOCKADDR_IN server_addr;
 
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(ctx->stGlobalConf.port + cellIndex_g);
+	server_addr.sin_port = htons(ctx->stGlobalConf.port + cellIndex_g * 10);
     server_addr.sin_addr.s_addr = inet_addr(ctx->stGlobalConf.ip);
 
 	sendto(ctx->cli_sock, ctx->sndBuf, ctx->sndBufLen, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
@@ -572,7 +608,7 @@ int vtysh_sys_cmd_cell_select(struct cmd_element *ce, struct vty *v, int argc, c
 { 
 	char *str = argv[0];
 	
-	if((strlen(str) != 1) || (*str < '0') || (*str > '2'))
+	if((NULL == str) || (strlen(str) != 1) || (*str < '0') || (*str > '2'))
 	{
         printf ("%% Invalid cellIndex, range(0~2).\n");
         return 0;
@@ -606,23 +642,23 @@ SInt32 vtysh_command_ins_sys()
 	struct cmd_element *ce = NULL;
 
 	ce = (struct cmd_element *)&(sys_cmd_connect);
-	ce->string = "cell Index";
+	ce->string = "cell <Index>";
 	//ce->doc = "choose a cell\r index of the cell(0;1;2)";
-	ce->doc = "choose a cell\r index(0,1,2)";
+	ce->doc = "Choose a cell\r Index of cell(0,1,2)";
 	ce->func = vtysh_sys_cmd_cell_select;
 	cmd_install_element(SYS_VIEW_NODE, ce);
 
 
     ce = (struct cmd_element *)&(sys_cmd_exit);
-	ce->string = "exit";
-	ce->doc = "exit to homepage";
+	ce->string = "back";
+	ce->doc = "Back to homepage";
 	ce->func = vtysh_cell_cmd_exit;
 	cmd_install_element(CELL_NODE, ce);
 
 
 	ce = (struct cmd_element *)&(sys_cmd_set);
 	ce->string = "quit";
-	ce->doc = "end the program";
+	ce->doc = "Quit the program";
 	ce->func = vtysh_cmd_quit;
 	cmd_install_element(SYS_VIEW_NODE, ce);
 	cmd_install_element(CELL_NODE, ce);

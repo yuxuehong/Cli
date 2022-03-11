@@ -93,6 +93,7 @@ void install_LteCommand()
 	int len = 0;
     unsigned int addr_len = 0;
     UInt32 RecvBufSize = 0xFFFF;
+    struct timeval tv;
 
     m_conn_ctx.cli_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);  
     if(m_conn_ctx.cli_sock  < 0)
@@ -106,7 +107,13 @@ void install_LteCommand()
         printf("setsockopt failed.\n");
         return;
     }
-    
+   
+    tv.tv_sec = m_conn_ctx.stGlobalConf.ClientTimeOut;
+    tv.tv_usec = 0;
+    if (setsockopt(m_conn_ctx.cli_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        printf("socket option  SO_RCVTIMEO not support\n");
+        return;
+    }
 
 	msg_hdr = (T_VTYSH_MSG_HDR *)(m_conn_ctx.sndBuf);	
 	msg_hdr->msgID = htonl(VTYSH_INIT_REQ);
@@ -114,23 +121,26 @@ void install_LteCommand()
 
 	m_conn_ctx.sndBufLen = sizeof(T_VTYSH_MSG_HDR);
 
-    printf("connecting...\n");
-	while(len <= 0)
+    printf("register cmd from server...\n");
+    vtysh_command_send_packet(&m_conn_ctx);
+	while(m_conn_ctx.waitState != VTYSH_WAIT_INPUT)
 	{  
-    	vtysh_command_send_packet(&m_conn_ctx);
     	len = recvfrom(m_conn_ctx.cli_sock, m_conn_ctx.recBuf, VTYSH_REC_BUFFER_SZ, 0, (struct sockaddr*)&server_addr, &addr_len);
         if(len > 0)
         {
             m_conn_ctx.recBufLen = len;
             vtysh_parse_comm_ind(&m_conn_ctx);
-            printf("conneted!\n");
         }
+        else if(len < 0)
+        {
+            /* ³¬Ê± */
+            printf("register cmd timeout...\n");
+            exit(0);
+        }      
     }
     
 
 	return;
-    
-
 }
 
 void global_init()

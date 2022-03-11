@@ -158,7 +158,7 @@ struct desc
 #define CMD_OPTION(S)   ((S[0]) == '[')
 #define CMD_VARIABLE(S) (((S[0]) >= 'A' && (S[0]) <= 'Z') || ((S[0]) == '<'))
 #define CMD_VARARG(S)   ((S[0]) == '.')
-#define CMD_RANGE(S)	((S[0] == '<'))
+#define CMD_RANGE(S)	((S[0] == '$'))
 
 #define CMD_IPV4(S)	   ((strcmp ((S), "A.B.C.D") == 0))
 #define CMD_IPV4_PREFIX(S) ((strcmp ((S), "A.B.C.D/M") == 0))
