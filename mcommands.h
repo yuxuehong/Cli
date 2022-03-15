@@ -55,6 +55,7 @@ typedef int SOCKET;
 
 
 /* 命令id定义 */
+#define MAX_CMD_ID_DEFINED    (UInt32)200
 #define SHOW_UE_TOTAL_CQI_CMDID    (UInt32)0x10000003
 #define SHOW_UE_TOTAL_DL_MCS_CMDID    (UInt32)0x10000004
 #define SHOW_UE_TOTAL_UL_MCS_CMDID    (UInt32)0x10000005
@@ -147,11 +148,18 @@ typedef struct{
 
 typedef struct
 {
+    UInt32 Ueindex_cmdId[MAX_CMD_ID_DEFINED];
+    UInt32 maxCmdNum;
+}st_UeIndex_Cmdid;
+
+typedef struct
+{
    char ip[20]; /* 服务器IP */
    unsigned char ServerGetPeirod;   /* 服务端数据统计周期 */
    unsigned char ClientTimeOut;     /* 客户端查询超时时间 */
    unsigned char ucPad[2];
    int port;                /* 服务端端口号 */
+   st_UeIndex_Cmdid tUeIndexCmdId;
 }T_GlobalConfig;
 
 

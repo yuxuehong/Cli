@@ -148,8 +148,8 @@ void global_init()
     /* 默认配置 */
     memset(&m_conn_ctx, 0, sizeof(m_conn_ctx));
     strncpy(m_conn_ctx.stGlobalConf.ip, "10.11.1.131", 20);
-    m_conn_ctx.stGlobalConf.port = 60000;
-    m_conn_ctx.stGlobalConf.ClientTimeOut = 10;
+    m_conn_ctx.stGlobalConf.port = 15900;
+    m_conn_ctx.stGlobalConf.ClientTimeOut = 20;
     m_conn_ctx.stGlobalConf.ServerGetPeirod = 1;
 
     /* 获取当前终端模式, 分包使用 */
@@ -164,9 +164,15 @@ void parse_global_config()
     char * jsonStr = NULL;
     cJSON * root = NULL;
 	cJSON * object = NULL;
+	cJSON * cmdObject = NULL;
+	cJSON * cmdParaUeIndexObject = NULL;
     cJSON * item = NULL;//cjson对象
+    int ArrLen = 0;
+    int i = 0;
+    int count = 0;
+    char *endStr = NULL;
 	
-	f = fopen("Config.txt","r");
+	f = fopen("CliCmdConfig.json","r");
 	if(NULL == f)
 	{
         return;
@@ -186,6 +192,12 @@ void parse_global_config()
     }
     else
     {
+        /* client Config */
+        object = cJSON_GetObjectItem(root, "ClientPara");
+		item = cJSON_GetObjectItem(object, "RecvTimeOut");
+		m_conn_ctx.stGlobalConf.ClientTimeOut = item->valueint;
+
+		/* server Config */
         object = cJSON_GetObjectItem(root, "ServerPara");
 		item = cJSON_GetObjectItem(object, "ServerIpAddress");
 		strncpy(m_conn_ctx.stGlobalConf.ip,item->valuestring,sizeof(m_conn_ctx.stGlobalConf.ip));
@@ -193,14 +205,36 @@ void parse_global_config()
 		m_conn_ctx.stGlobalConf.port = item->valueint;
 		item = cJSON_GetObjectItem(object, "ServerGetPeriod");
 		m_conn_ctx.stGlobalConf.ServerGetPeirod = item->valueint;
-        
 
-		object = cJSON_GetObjectItem(root, "ClientPara");
-		item = cJSON_GetObjectItem(object, "RecvTimeOut");
-		m_conn_ctx.stGlobalConf.ClientTimeOut = item->valueint;
-		cJSON_Delete(root);
+		/* 分包cmdid定义 */
+        cmdObject = cJSON_GetObjectItem(root, "CmdidWithPara");
+        cmdParaUeIndexObject = cJSON_GetObjectItem(cmdObject, "cmdidWithUeIndex");
+        if (cJSON_IsArray(cmdParaUeIndexObject))
+    	{
+    		ArrLen = cJSON_GetArraySize(cmdParaUeIndexObject);
+    		//printf("ObjArr Len: %d\n", ArrLen);
+    		for (i = 0; i < ArrLen; i++)
+    		{
+    			cJSON * SubObj = cJSON_GetArrayItem(cmdParaUeIndexObject, i);
+    			if(NULL == SubObj)
+    			{
+    				continue;
+    			}
+    			//printf("cmdid:0x%x\n", strtol(cJSON_GetObjectItem(SubObj, "CmdId")->valuestring, &endStr, 16));
+    			if(count >= MAX_CMD_ID_DEFINED)
+    			{
+                    printf("reg cmdid overrange.\n");
+                    goto RET;
+                    
+    			}
+    			m_conn_ctx.stGlobalConf.tUeIndexCmdId.Ueindex_cmdId[count++] = strtol(cJSON_GetObjectItem(SubObj, "CmdId")->valuestring, &endStr, 16);
+    		}
+    	}
+
+        m_conn_ctx.stGlobalConf.tUeIndexCmdId.maxCmdNum = count;
     }
-	
+    RET:
+	cJSON_Delete(root);
 	free(jsonStr);
     return; 
 

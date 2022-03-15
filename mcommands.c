@@ -332,7 +332,30 @@ void send_req_server(T_VTYSH_CONN_CTX *ctx, char *LastData)
     int argc = 0;
     char *argv[MAX_ARGV_NUM] = {NULL};
     T_ArgvType ArgType[MAX_ARGV_NUM] = {0};
+    UInt32 i = 0;
 
+    /* 参数是UeIndex类型 */
+    for(i = 0; i < m_conn_ctx.stGlobalConf.tUeIndexCmdId.maxCmdNum; i++)
+    {
+        if(m_conn_ctx.CurCmdId == m_conn_ctx.stGlobalConf.tUeIndexCmdId.Ueindex_cmdId[i])
+        {
+            Get_Para_LastUeIndex((T_UeIndexLastData *)LastData, &argc, ArgType, argv);
+            break;
+        }
+    }
+
+    /* 参数是其他类型....待扩展 */
+
+    if(i == m_conn_ctx.stGlobalConf.tUeIndexCmdId.maxCmdNum)
+    {
+        vtysh_command_state_to(VTYSH_WAIT_INPUT);  
+        printf("Err cmdid(0x%x)!\n", m_conn_ctx.CurCmdId);
+        return;
+    }
+
+
+    
+/*
     switch(m_conn_ctx.CurCmdId)
     {
         case SHOW_UE_TOTAL_CQI_CMDID:
@@ -350,7 +373,7 @@ void send_req_server(T_VTYSH_CONN_CTX *ctx, char *LastData)
             vtysh_command_state_to(VTYSH_WAIT_INPUT);  
             printf("Err cmdid(0x%x)!\n", m_conn_ctx.CurCmdId);
         return;
-    }
+    }*/
 
 
 	PackageExecInfo(ctx, FALSE, argc, ArgType, argv);
